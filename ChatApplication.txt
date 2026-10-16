@@ -1,0 +1,124 @@
+import javax.swing.*;
+import java.awt.*;
+import java.io.*;
+import java.net.Socket;
+
+/**
+ * ChatClient - Swing GUI that connects to ChatServer.
+ * Run as many copies as you like to chat between them.
+ */
+public class ChatClient extends JFrame {
+
+    private static final int PORT = 5000;
+
+    private final JTextArea chatArea = new JTextArea();
+    private final JTextField inputField = new JTextField();
+    private final JButton sendButton = new JButton("Send");
+
+    private Socket socket;
+    private BufferedReader in;
+    private PrintWriter out;
+
+    public ChatClient(String host, String username) throws IOException {
+        super("Chat - " + username);
+
+        // ----- Connect and register username -----
+        socket = new Socket(host, PORT);
+        in = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
+        out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
+        out.println(username);
+        String reply = in.readLine();
+        if (!"NAME_OK".equals(reply)) {
+            socket.close();
+            throw new IOException("Username is empty or already taken.");
+        }
+
+        // ----- Build the window -----
+        chatArea.setEditable(false);
+        chatArea.setLineWrap(true);
+        chatArea.setWrapStyleWord(true);
+        chatArea.setFont(new Font("SansSerif", Font.PLAIN, 14));
+
+        JPanel bottom = new JPanel(new BorderLayout(5, 5));
+        bottom.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        bottom.add(inputField, BorderLayout.CENTER);
+        bottom.add(sendButton, BorderLayout.EAST);
+
+        add(new JScrollPane(chatArea), BorderLayout.CENTER);
+        add(bottom, BorderLayout.SOUTH);
+
+        setSize(480, 520);
+        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        sendButton.addActionListener(e -> sendMessage());
+        inputField.addActionListener(e -> sendMessage());   // Enter key
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent e) {
+                disconnect();
+            }
+        });
+
+        appendMessage("Connected. Commands: /users, /msg <name> <text>, /quit");
+
+        // ----- Background thread that listens for incoming messages -----
+        Thread listener = new Thread(() -> {
+            try {
+                String line;
+                while ((line = in.readLine()) != null) {
+                    appendMessage(line);
+                }
+            } catch (IOException ignored) {
+            }
+            appendMessage("*** Disconnected from server ***");
+            SwingUtilities.invokeLater(() -> {
+                inputField.setEnabled(false);
+                sendButton.setEnabled(false);
+            });
+        });
+        listener.setDaemon(true);
+        listener.start();
+    }
+
+    private void sendMessage() {
+        String text = inputField.getText().trim();
+        if (text.isEmpty()) return;
+        out.println(text);
+        inputField.setText("");
+        if (text.equalsIgnoreCase("/quit")) disconnect();
+    }
+
+    private void appendMessage(String message) {
+        SwingUtilities.invokeLater(() -> {
+            chatArea.append(message + "\n");
+            chatArea.setCaretPosition(chatArea.getDocument().getLength());
+        });
+    }
+
+    private void disconnect() {
+        try {
+            out.println("/quit");
+            socket.close();
+        } catch (IOException ignored) {
+        }
+        dispose();
+        System.exit(0);
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            String host = JOptionPane.showInputDialog(null, "Server address:", "localhost");
+            if (host == null) return;
+            String username = JOptionPane.showInputDialog(null, "Choose a username:");
+            if (username == null) return;
+
+            try {
+                new ChatClient(host.trim(), username.trim()).setVisible(true);
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(null, "Could not connect: " + e.getMessage(),
+                        "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+    }
+}
